@@ -5,11 +5,11 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[dependencies]
+flem = "0.5"
+
 [dependencies.serialport]
 serialport = "4.2"
 # git = "https://github.com/metta-systems/serialport-rs"
 # branch = "macos-ENOTTY-fix"
 # path = "./serialport-rs"
-
-[dependencies.flem]
-git = "https://github.com/BridgeSource/flem-rs.git"

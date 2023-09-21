@@ -134,6 +134,8 @@ impl<const T: usize> FlemSerial<T> {
             let mut rx_buffer = [0 as u8; T];
             let mut rx_packet = flem::Packet::<T>::new();
 
+            let error = 0;
+
             while *continue_listening_clone.lock().unwrap() {
                 match local_rx_port.read(&mut rx_buffer) {
                     Ok(bytes_to_read) => {
@@ -143,25 +145,27 @@ impl<const T: usize> FlemSerial<T> {
                             thread::sleep(Duration::from_millis(10));
                         } else {
                             for i in 0..bytes_to_read {
-                                match rx_packet.add_byte(rx_buffer[i]) {
-                                    Status::PacketReceived => {
+                                match rx_packet.construct(rx_buffer[i]) {
+                                    Ok(_) => {
                                         successful_packet_queue.send(rx_packet.clone()).unwrap();
                                         rx_packet.reset_lazy();
                                     }
-                                    Status::PacketBuilding => {
-                                        // Normal, building packet
-                                    }
-                                    Status::HeaderBytesNotFound => {
-                                        rx_packet.reset_lazy();
-                                    }
-                                    _ => {
-                                        rx_packet.reset_lazy();
+                                    Err(error) => {
+                                        match error {
+                                            Status::PacketBuilding => {
+                                                // Normal, building packet
+                                            }
+                                            _ => {
+                                                rx_packet.reset_lazy();
+                                            }
+                                        }
                                     }
                                 }
                             }
                         }
                     }
                     Err(_error) => {
+
                         // Library indicates to retry on errors, so that is
                         // what we will do.
                     }
