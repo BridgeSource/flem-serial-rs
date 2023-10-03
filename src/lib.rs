@@ -39,6 +39,7 @@ impl<const PACKET_SIZE: usize> FlemRx<PACKET_SIZE> {
     }
 }
 
+#[derive(Clone)]
 pub struct FlemTx<const PACKET_SIZE: usize> {
     tx_packet_queue: Sender<flem::Packet<PACKET_SIZE>>,
 }
