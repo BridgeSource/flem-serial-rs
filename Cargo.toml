@@ -10,7 +10,5 @@ license = "MIT"
 
 [dependencies]
 flem = "0.5"
-
-[dependencies.serialport]
 serialport = "4.2"
 
