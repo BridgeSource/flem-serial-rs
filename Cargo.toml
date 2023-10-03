@@ -4,7 +4,7 @@ version = "0.2.0"
 edition = "2021"
 authors = ["Austin McElroy <mcelroy.austin@gmail.com>"]
 description = "A serial port implementation of the FLEM protocol for host computers running Windows, Linux, or MacOS."
-license = "LICENSE"
+license = "MIT"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
