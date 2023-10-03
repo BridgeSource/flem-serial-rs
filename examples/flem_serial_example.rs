@@ -1,11 +1,12 @@
 use std::{io, thread, time::Duration};
 
-use flem::Status;
-
+// Usually, embedded targets have a smaller packet size, for example 128 bytes of data (and 8 bytes for the header).
+// The packet size is the WORST CASE size, and FLEM packets can easily handle smaller packets.
 const PACKET_SIZE: usize = 512;
+const BUFFER_SIZE: usize = 2048;
 
 fn main() {
-    let mut flem_serial = flem_serial_rs::FlemSerial::<PACKET_SIZE>::new();
+    let mut flem_serial = flem_serial_rs::FlemSerial::<PACKET_SIZE, BUFFER_SIZE>::new();
 
     let mut input_buffer = String::new();
 
@@ -28,13 +29,14 @@ fn main() {
 
                 // Select the serial port to use
                 match io::stdin().read_line(&mut input_buffer) {
-                    Ok(characters) => {
+                    Ok(_characters) => {
                         match input_buffer.trim().parse::<usize>() {
                             Ok(selection) => {
                                 if selection < line {
                                     // Selection is valid
                                     selection_invalid = false;
                                     selected_port = Some(ports[selection].clone());
+                                    println!("Connecting to port {}", ports[selection]);
                                 } else if selection == line {
                                     // quit the program
                                     return;
@@ -83,30 +85,45 @@ fn main() {
         }
     }
 
-    let flem_rx = flem_serial.listen();
+    // Start the FLEM serial listener threads. This will spawn two threads to handle Rx and Tx of FLEM packets.
+    // The Rx struct is backed by a queue that will only be populated with packets that pass the CRC check.
+    // The Tx struct can be cloned and used by any thread to send packets.
+    let (flem_rx, flem_tx) = flem_serial.listen(10, 50);
 
-    let mut packet = flem::Packet::<PACKET_SIZE>::new();
-    packet.set_request(5);
-    packet.pack();
-    flem_serial.send(&packet);
+    // Any thread that would like to send a packet can clone the Tx Queue
+    let _flem_tx_clone = flem_tx.clone();
+    let flem_tx_clone_1 = flem_tx.clone();
+    //...
+    let _flem_tx_clone_10 = flem_tx.clone();
 
-    let uart_rx_thread_processor = thread::spawn(move || {
-        let mut timeout = 0;
-        let rx_queue = flem_rx.queue();
+    // Note - This example doesn't properly shut down the threads, just kill the program
+    println!("Starting Tx broadcast thread - Press Enter to send an ID packet");
+    let _uart_tx_thread = thread::spawn(move || loop {
+        println!("Press Enter to send an ID packet");
+        match io::stdin().read_line(&mut input_buffer) {
+            Ok(_) => {
+                println!("Sending ID packet request");
+                let mut packet = flem::Packet::<PACKET_SIZE>::new();
+                packet.set_request(flem::Request::ID);
+                packet.pack();
+                flem_tx_clone_1.send(&packet).unwrap();
+            }
+            Err(_) => {}
+        }
+    });
+
+    // Note - This example doesn't properly shut down the threads, just kill the program
+    println!("Starting RX listening thread");
+    let _uart_rx_thread_processor = thread::spawn(move || {
         loop {
-            match rx_queue.recv() {
-                Ok(packet) => {
-                    timeout = 0;
+            match flem_rx.recv() {
+                Some(packet) => {
+                    // Any packet received is guaranteed to be validated, so you just need to handle the
+                    // requests and events.
                     let packet_data = &packet.get_data();
                     match packet.get_request() {
                         flem::Request::EVENT => {
-                            let mut float_data = Vec::<f32>::new();
-                            for slice in packet_data.chunks(4) {
-                                float_data.push(f32::from_le_bytes([
-                                    slice[0], slice[1], slice[2], slice[3],
-                                ]));
-                            }
-                            println!("Real: {}, Imag: {}", float_data[0], float_data[1]);
+                            // TODO - Implement event handler for specific project
                         }
                         flem::Request::ID => {
                             let id: flem::DataId = flem::DataId::from(packet_data).unwrap();
@@ -120,18 +137,24 @@ fn main() {
                             );
                         }
                         _ => {
+                            // TODO - Handle other requests
                             println!("Unknown command");
                         }
                     }
                 }
-                Err(_) => {
-                    timeout += 1;
-                    thread::sleep(Duration::from_millis(1));
-                    if timeout > 100 {}
+                None => {
+                    // Wait for data
+                    thread::sleep(Duration::from_millis(20));
                 }
             }
         }
     });
 
-    uart_rx_thread_processor.join().unwrap();
+    // This won't be hit since the two threads above never quite, but if they did...
+    _uart_rx_thread_processor.join().unwrap();
+    _uart_tx_thread.join().unwrap();
+
+    // If we were to properly close down the `_uart_rx_thread_processor` and `_uart_tx_thread`, we would call
+    // the `.unlisten()` function to close the serial port backing threads.
+    flem_serial.unlisten();
 }
