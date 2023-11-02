@@ -104,7 +104,7 @@ fn main() {
             Ok(_) => {
                 println!("Sending ID packet request");
                 let mut packet = flem::Packet::<PACKET_SIZE>::new();
-                packet.set_request(flem::Request::ID);
+                packet.set_request(flem::request::ID);
                 packet.pack();
                 flem_tx_clone_1.send(&packet).unwrap();
             }
@@ -122,10 +122,7 @@ fn main() {
                     // requests and events.
                     let packet_data = &packet.get_data();
                     match packet.get_request() {
-                        flem::Request::EVENT => {
-                            // TODO - Implement event handler for specific project
-                        }
-                        flem::Request::ID => {
+                        flem::request::ID => {
                             let id: flem::DataId = flem::DataId::from(packet_data).unwrap();
                             println!(
                                 "Flem Device: {:?}, version {}.{}.{}, packet size: {}",
