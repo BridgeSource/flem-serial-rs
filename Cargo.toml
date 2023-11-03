@@ -1,6 +1,6 @@
 [package]
 name = "flem-serial-rs"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2021"
 authors = ["Austin McElroy <mcelroy.austin@gmail.com>"]
 description = "A serial port implementation of the FLEM protocol for host computers running Windows, Linux, or MacOS."
