@@ -9,6 +9,6 @@ license = "MIT"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-flem = "0.5"
 serialport = "4.2"
+flem = "0.6"
 
