@@ -10,5 +10,10 @@ license = "MIT"
 
 [dependencies]
 serialport = "4.2"
-flem = "0.6"
+# flem = "0.6"
+
+[dependencies.flem]
+path = "../flem-rs"
+features = ["std"]
+
 

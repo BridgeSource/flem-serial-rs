@@ -1,4 +1,8 @@
-use flem::Status;
+use flem::{
+    Status,
+    traits::Channel, 
+    Packet,
+};
 use serialport::SerialPort;
 use std::{
     sync::{
@@ -13,65 +17,49 @@ use std::{
 type FlemSerialPort = Box<dyn SerialPort>;
 type FlemSerialTx = Option<Arc<Mutex<FlemSerialPort>>>;
 
-pub enum HostSerialPortErrors {
+pub struct FlemSerial<const PACKET_SIZE: usize> {
+    tx_port: FlemSerialTx,
+    continue_listening: Arc<Mutex<bool>>,
+    rx_listener_handle: Option<JoinHandle<()>>,
+    tx_listener_handle: Option<JoinHandle<()>>,
+    connection_settings: ConnectionSettings,
+}
+pub enum FlemSerialErrors {
     NoDeviceFoundByThatName,
     MultipleDevicesFoundByThatName,
     ErrorConnectingToDevice,
 }
 
-pub struct FlemSerial<const PACKET_SIZE: usize, const BUFFER_SIZE: usize> {
-    tx_port: FlemSerialTx,
-    continue_listening: Arc<Mutex<bool>>,
-    rx_listener_handle: Option<JoinHandle<()>>,
-    tx_listener_handle: Option<JoinHandle<()>>,
+pub struct ConnectionSettings {
+    baud: u32,
 }
 
-pub struct FlemRx<const PACKET_SIZE: usize> {
-    rx_packet_queue: Receiver<flem::Packet<PACKET_SIZE>>,
-}
-
-impl<const PACKET_SIZE: usize> FlemRx<PACKET_SIZE> {
-    pub fn recv(&self) -> Option<flem::Packet<PACKET_SIZE>> {
-        match self.rx_packet_queue.recv() {
-            Ok(packet) => Some(packet),
-            Err(_error) => None,
-        }
-    }
-}
-
-#[derive(Clone)]
-pub struct FlemTx<const PACKET_SIZE: usize> {
-    tx_packet_queue: Sender<flem::Packet<PACKET_SIZE>>,
-}
-
-impl<const PACKET_SIZE: usize> FlemTx<PACKET_SIZE> {
-    pub fn send(
-        &self,
-        packet: &flem::Packet<PACKET_SIZE>,
-    ) -> Result<(), mpsc::SendError<flem::Packet<PACKET_SIZE>>> {
-        self.tx_packet_queue.send(*packet)
-    }
-
-    pub fn clone(&self) -> Self {
+impl ConnectionSettings {
+    pub fn default() -> Self {
         Self {
-            tx_packet_queue: self.tx_packet_queue.clone(),
+            baud: 115200,
         }
     }
 }
 
-impl<const PACKET_SIZE: usize, const BUFFER_SIZE: usize> FlemSerial<PACKET_SIZE, BUFFER_SIZE> {
+impl<const PACKET_SIZE: usize> FlemSerial<PACKET_SIZE> {
     pub fn new() -> Self {
         Self {
             tx_port: None,
             continue_listening: Arc::new(Mutex::new(false)),
             rx_listener_handle: None,
             tx_listener_handle: None,
+            connection_settings: ConnectionSettings::default(),
         }
     }
+}
+
+impl<const PACKET_SIZE: usize> Channel<PACKET_SIZE> for FlemSerial<PACKET_SIZE> {
+    type Error = FlemSerialErrors;
 
     /// Lists the ports detected by the SerialPort library. Returns None if
     /// no serial ports are detected.
-    pub fn list_serial_ports(&self) -> Option<Vec<String>> {
+    fn list_devices(&self) -> Vec<String> {
         let mut vec_ports = Vec::new();
 
         let ports = serialport::available_ports();
@@ -82,12 +70,13 @@ impl<const PACKET_SIZE: usize, const BUFFER_SIZE: usize> FlemSerial<PACKET_SIZE,
                     println!("Found serial port: {}", port.port_name);
                     vec_ports.push(port.port_name);
                 }
-                return Some(vec_ports);
             }
             Err(_error) => {
-                return None;
+
             }
         }
+
+        vec_ports
     }
 
     /// Attempts to connect to a serial port with a set baud.
@@ -97,7 +86,7 @@ impl<const PACKET_SIZE: usize, const BUFFER_SIZE: usize> FlemSerial<PACKET_SIZE,
     /// * Parity: None
     /// * DataBits: 8
     /// * StopBits: 1
-    pub fn connect(&mut self, port_name: &String, baud: u32) -> Result<(), HostSerialPortErrors> {
+    fn connect(&mut self, port_name: &String) -> Result<(), Self::Error> {
         let ports = serialport::available_ports().unwrap();
 
         let filtered_ports: Vec<_> = ports
@@ -108,11 +97,11 @@ impl<const PACKET_SIZE: usize, const BUFFER_SIZE: usize> FlemSerial<PACKET_SIZE,
         match filtered_ports.len() {
             0 => {
                 println!("No serial devices enumerated");
-                Err(HostSerialPortErrors::NoDeviceFoundByThatName)
+                Err(FlemSerialErrors::NoDeviceFoundByThatName)
             }
             1 => {
                 println!("Found {}, attempting to connect...", port_name);
-                if let Ok(port) = serialport::new(port_name, baud)
+                if let Ok(port) = serialport::new(port_name, self.connection_settings.baud)
                     .flow_control(serialport::FlowControl::None)
                     .parity(serialport::Parity::None)
                     .data_bits(serialport::DataBits::Eight)
@@ -129,7 +118,7 @@ impl<const PACKET_SIZE: usize, const BUFFER_SIZE: usize> FlemSerial<PACKET_SIZE,
                     return Ok(());
                 } else {
                     println!("Connection failed to {}", port_name);
-                    return Err(HostSerialPortErrors::ErrorConnectingToDevice);
+                    return Err(FlemSerialErrors::ErrorConnectingToDevice);
                 }
             }
             _ => {
@@ -137,15 +126,15 @@ impl<const PACKET_SIZE: usize, const BUFFER_SIZE: usize> FlemSerial<PACKET_SIZE,
                     "Connection failed to {}, multiple devices by that name found",
                     port_name
                 );
-                Err(HostSerialPortErrors::MultipleDevicesFoundByThatName)
+                Err(FlemSerialErrors::MultipleDevicesFoundByThatName)
             }
         }
     }
 
-    pub fn disconnect(&mut self) -> Option<()> {
+    fn disconnect(&mut self) -> Result<(), Self::Error> {
         self.unlisten();
 
-        Some(())
+        Ok(())
     }
 
     /// Spawns a new thread and listens for data on. Creates 2 threads, 1 to monitor incoming Rx bytes and 1 to monitor
@@ -158,11 +147,11 @@ impl<const PACKET_SIZE: usize, const BUFFER_SIZE: usize> FlemSerial<PACKET_SIZE,
     /// ## Returns a tuple of (FlemRx, FlemTx):
     /// * `FlemRx` - A struct that contains a `Receiver` queue of successfully checksumed packets and a handle to the Rx monitoring thread.
     /// * `FlemTx` - A struct that contains a `Sender` that can be used to send packets and a handle to the Tx monitoring thread.
-    pub fn listen(
+    fn listen(
         &mut self,
         rx_sleep_time_ms: u64,
         tx_sleep_time_ms: u64,
-    ) -> (FlemRx<PACKET_SIZE>, FlemTx<PACKET_SIZE>) {
+    ) -> (Sender<Packet<PACKET_SIZE>>, Receiver<Packet<PACKET_SIZE>>) {
         // Reset the continue_listening flag
         *self.continue_listening.lock().unwrap() = true;
 
@@ -171,8 +160,8 @@ impl<const PACKET_SIZE: usize, const BUFFER_SIZE: usize> FlemSerial<PACKET_SIZE,
         let continue_listening_clone_tx = self.continue_listening.clone();
 
         // Create producer / consumer queues
-        let (successful_packet_queue, rx) = mpsc::channel::<flem::Packet<PACKET_SIZE>>();
-        let (tx_packet_queue, tx) = mpsc::channel::<flem::Packet<PACKET_SIZE>>();
+        let (tx_packet_from_program, packet_to_transmit) = mpsc::channel::<flem::Packet<PACKET_SIZE>>();
+        let (validated_packet, rx_packet_to_program) = mpsc::channel::<flem::Packet<PACKET_SIZE>>();
 
         let mut local_rx_port = self
             .tx_port
@@ -196,7 +185,7 @@ impl<const PACKET_SIZE: usize, const BUFFER_SIZE: usize> FlemSerial<PACKET_SIZE,
             println!("Starting Tx thread");
             while *continue_listening_clone_tx.lock().unwrap() {
                 // Using a timeout so we can stop the thread when needed
-                match tx.recv_timeout(Duration::from_millis(tx_sleep_time_ms)) {
+                match packet_to_transmit.recv_timeout(Duration::from_millis(tx_sleep_time_ms)) {
                     Ok(packet) => {
                         if let Ok(_) = local_tx_port.write_all(&packet.bytes()) {
                             local_tx_port.flush().unwrap();
@@ -215,7 +204,7 @@ impl<const PACKET_SIZE: usize, const BUFFER_SIZE: usize> FlemSerial<PACKET_SIZE,
         self.rx_listener_handle = Some(thread::spawn(move || {
             println!("Starting Rx thread");
 
-            let mut rx_buffer = [0 as u8; BUFFER_SIZE];
+            let mut rx_buffer = [0 as u8; 2048];
             let mut rx_packet = flem::Packet::<PACKET_SIZE>::new();
 
             while *continue_listening_clone_rx.lock().unwrap() {
@@ -229,7 +218,7 @@ impl<const PACKET_SIZE: usize, const BUFFER_SIZE: usize> FlemSerial<PACKET_SIZE,
                             for i in 0..bytes_to_read {
                                 match rx_packet.construct(rx_buffer[i]) {
                                     Ok(_) => {
-                                        successful_packet_queue.send(rx_packet.clone()).unwrap();
+                                        validated_packet.send(rx_packet.clone()).unwrap();
                                         rx_packet.reset_lazy();
                                     }
                                     Err(error) => {
@@ -267,17 +256,13 @@ impl<const PACKET_SIZE: usize, const BUFFER_SIZE: usize> FlemSerial<PACKET_SIZE,
         }));
 
         (
-            FlemRx {
-                rx_packet_queue: rx,
-            },
-            FlemTx {
-                tx_packet_queue: tx_packet_queue,
-            },
+            tx_packet_from_program,
+            rx_packet_to_program
         )
     }
 
     /// Attempts to close down the Rx and Tx threads.
-    pub fn unlisten(&mut self) {
+    fn unlisten(&mut self) -> Result<(), Self::Error>{
         *self.continue_listening.lock().unwrap() = false;
 
         if self.tx_listener_handle.is_some() {
@@ -295,5 +280,7 @@ impl<const PACKET_SIZE: usize, const BUFFER_SIZE: usize> FlemSerial<PACKET_SIZE,
                 .join()
                 .expect("Couldn't join on Rx thread");
         }
+
+        Ok(())
     }
 }
