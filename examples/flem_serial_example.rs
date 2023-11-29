@@ -1,12 +1,12 @@
+use flem::traits::Channel;
 use std::{io, thread, time::Duration};
 
 // Usually, embedded targets have a smaller packet size, for example 128 bytes of data (and 8 bytes for the header).
 // The packet size is the WORST CASE size, and FLEM packets can easily handle smaller packets.
 const PACKET_SIZE: usize = 512;
-const BUFFER_SIZE: usize = 2048;
 
 fn main() {
-    let mut flem_serial = flem_serial_rs::FlemSerial::<PACKET_SIZE, BUFFER_SIZE>::new();
+    let mut flem_serial = flem_serial_rs::FlemSerial::<PACKET_SIZE>::new();
 
     let mut input_buffer = String::new();
 
@@ -15,8 +15,20 @@ fn main() {
     let mut selected_port: Option<String> = None;
 
     while selection_invalid {
-        match flem_serial.list_serial_ports() {
-            Some(ports) => {
+        let ports = flem_serial.list_devices();
+        match ports.len() {
+            0 => {
+                println!("No serial ports detected, press any key to quit...");
+                match io::stdin().read_line(&mut input_buffer) {
+                    Ok(_) => {
+                        return;
+                    }
+                    Err(_) => {
+                        return;
+                    }
+                }
+            }
+            _ => {
                 let mut line = 0;
                 for port in ports.iter() {
                     println!("{}. {}", line, port);
@@ -59,22 +71,11 @@ fn main() {
                     }
                 }
             }
-            None => {
-                println!("No serial ports detected, press any key to quit...");
-                match io::stdin().read_line(&mut input_buffer) {
-                    Ok(_) => {
-                        return;
-                    }
-                    Err(_) => {
-                        return;
-                    }
-                }
-            }
         }
     }
 
     let port_name = &selected_port.unwrap();
-    match flem_serial.connect(port_name, 115200) {
+    match flem_serial.connect(port_name) {
         Ok(_) => {}
         Err(_) => {
             println!(
@@ -88,7 +89,7 @@ fn main() {
     // Start the FLEM serial listener threads. This will spawn two threads to handle Rx and Tx of FLEM packets.
     // The Rx struct is backed by a queue that will only be populated with packets that pass the CRC check.
     // The Tx struct can be cloned and used by any thread to send packets.
-    let (flem_rx, flem_tx) = flem_serial.listen(10, 50);
+    let (flem_tx, flem_rx) = flem_serial.listen(10, 50);
 
     // Any thread that would like to send a packet can clone the Tx Queue
     let _flem_tx_clone = flem_tx.clone();
@@ -106,7 +107,7 @@ fn main() {
                 let mut packet = flem::Packet::<PACKET_SIZE>::new();
                 packet.set_request(flem::request::ID);
                 packet.pack();
-                flem_tx_clone_1.send(&packet).unwrap();
+                flem_tx_clone_1.send(packet).unwrap();
             }
             Err(_) => {}
         }
@@ -117,7 +118,7 @@ fn main() {
     let _uart_rx_thread_processor = thread::spawn(move || {
         loop {
             match flem_rx.recv() {
-                Some(packet) => {
+                Ok(packet) => {
                     // Any packet received is guaranteed to be validated, so you just need to handle the
                     // requests and events.
                     let packet_data = &packet.get_data();
@@ -139,7 +140,7 @@ fn main() {
                         }
                     }
                 }
-                None => {
+                Err(_) => {
                     // Wait for data
                     thread::sleep(Duration::from_millis(20));
                 }
@@ -153,5 +154,5 @@ fn main() {
 
     // If we were to properly close down the `_uart_rx_thread_processor` and `_uart_tx_thread`, we would call
     // the `.unlisten()` function to close the serial port backing threads.
-    flem_serial.unlisten();
+    let _ = flem_serial.unlisten();
 }

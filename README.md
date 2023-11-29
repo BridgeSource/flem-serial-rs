@@ -1,6 +1,11 @@
 # FLEM Serial Rust
 This library is meant to be an easy to use serial implementation of FLEM. 
 
+## Changelog
+
+### 0.3.0
+- Updated `flem-serial-rs` to use the new `flem::traits::Channel`, this is a breaking change
+
 ## What is FLEM
 [FLEM stands for Flexible, Lightweight, Embedded Messaging](https://github.com/BridgeSource/flem-rs) protocol. It is
 designed to work on embedded targets as well as host devices using a common codebase to encode and decode any type 
