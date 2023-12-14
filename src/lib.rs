@@ -24,6 +24,7 @@ pub struct FlemSerial<const PACKET_SIZE: usize> {
     tx_listener_handle: Option<JoinHandle<()>>,
     connection_settings: ConnectionSettings,
 }
+#[derive(Debug)]
 pub enum FlemSerialErrors {
     NoDeviceFoundByThatName,
     MultipleDevicesFoundByThatName,
@@ -175,7 +176,9 @@ impl<const PACKET_SIZE: usize> Channel<PACKET_SIZE> for FlemSerial<PACKET_SIZE> 
     }
 
     fn disconnect(&mut self) -> Result<(), Self::Error> {
-        self.unlisten();
+        self.unlisten().unwrap();
+
+        self.tx_port = None;
 
         Ok(())
     }

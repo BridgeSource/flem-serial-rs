@@ -3,6 +3,9 @@ This library is meant to be an easy to use serial implementation of FLEM.
 
 ## Changelog
 
+### 0.3.2
+- Disconnect now disposes of the serial port object. This fixes an issue when using `connect` subsequent times.
+
 ### 0.3.1
 - Expanded `ConnectionSettings` to include parity, stop bits, and flow control.
 - Added `update_connection_settings` to `FlemSerial` to alter the connection settings.
