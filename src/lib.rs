@@ -30,15 +30,54 @@ pub enum FlemSerialErrors {
     ErrorConnectingToDevice,
 }
 
+#[derive(Clone, Copy, Debug)]
 pub struct ConnectionSettings {
     baud: u32,
+    parity: serialport::Parity,
+    flow_control: serialport::FlowControl,
+    data_bits: serialport::DataBits,
+    stop_bits: serialport::StopBits,
 }
 
 impl ConnectionSettings {
     pub fn default() -> Self {
         Self {
             baud: 115200,
+            parity: serialport::Parity::None,
+            flow_control: serialport::FlowControl::None,
+            data_bits: serialport::DataBits::Eight,
+            stop_bits: serialport::StopBits::One,
         }
+    }
+
+    /// Set baud rate
+    pub fn baud(&mut self, baud: u32) -> &mut Self {
+        self.baud = baud;
+        self
+    }
+
+    /// Set parity
+    pub fn parity(&mut self, parity: serialport::Parity) -> &mut Self {
+        self.parity = parity;
+        self
+    }
+
+    /// Set flow control
+    pub fn flow_control(&mut self, flow_control: serialport::FlowControl) -> &mut Self {
+        self.flow_control = flow_control;
+        self
+    }
+
+    /// Set data bits
+    pub fn data_bits(&mut self, data_bits: serialport::DataBits) -> &mut Self {
+        self.data_bits = data_bits;
+        self
+    }
+
+    /// Set stop bits
+    pub fn stop_bits(&mut self, stop_bits: serialport::StopBits) -> &mut Self {
+        self.stop_bits = stop_bits;
+        self
     }
 }
 
@@ -51,6 +90,10 @@ impl<const PACKET_SIZE: usize> FlemSerial<PACKET_SIZE> {
             tx_listener_handle: None,
             connection_settings: ConnectionSettings::default(),
         }
+    }
+
+    pub fn update_connection_settings(&mut self, connection_settings: ConnectionSettings) {
+        self.connection_settings = connection_settings;
     }
 }
 
@@ -102,10 +145,10 @@ impl<const PACKET_SIZE: usize> Channel<PACKET_SIZE> for FlemSerial<PACKET_SIZE> 
             1 => {
                 println!("Found {}, attempting to connect...", port_name);
                 if let Ok(port) = serialport::new(port_name, self.connection_settings.baud)
-                    .flow_control(serialport::FlowControl::None)
-                    .parity(serialport::Parity::None)
-                    .data_bits(serialport::DataBits::Eight)
-                    .stop_bits(serialport::StopBits::One)
+                    .flow_control(self.connection_settings.flow_control)
+                    .parity(self.connection_settings.parity)
+                    .data_bits(self.connection_settings.data_bits)
+                    .stop_bits(self.connection_settings.stop_bits)
                     .open()
                 {
                     self.tx_port = Some(Arc::new(Mutex::new(
